@@ -11,12 +11,21 @@ export interface QuizQuestion {
   options: string[];
   correctAnswerIndex: number;
   explanation: string;
+  hint?: string;
+}
+
+export interface ContentSection {
+  title: string;
+  content: string;
 }
 
 export interface SummaryData {
   originalTopic: string;
-  summaryContent: string;
+  introduction: string;
+  sections: ContentSection[];
+  examples: string[];
   keyPoints: string[];
+  infographicSvg?: string;
 }
 
 export interface QuizState {
@@ -25,4 +34,16 @@ export interface QuizState {
   score: number;
   selectedOption: number | null;
   showExplanation: boolean;
+  attempts: number;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+}
+
+export interface FileData {
+  base64: string;
+  mimeType: string;
+  fileName: string;
 }

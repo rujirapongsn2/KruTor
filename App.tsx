@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { AppScreen, SummaryData, QuizState } from './types';
+import { AppScreen, SummaryData, QuizState, FileData } from './types';
 import { generateSummary, generateQuiz } from './services/geminiService';
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 import Mascot from './components/Mascot';
 import Button from './components/Button';
+import { ChatBot } from './components/ChatBot';
 
 // Icons
 const UploadIcon = () => (
@@ -15,6 +18,7 @@ const App: React.FC = () => {
   const [screen, setScreen] = useState<AppScreen>(AppScreen.UPLOAD);
   const [inputText, setInputText] = useState('');
   const [fileName, setFileName] = useState<string | undefined>(undefined);
+  const [fileData, setFileData] = useState<FileData | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [quizState, setQuizState] = useState<QuizState>({
     questions: [],
@@ -30,45 +34,69 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check file size (max 50MB)
+    if (file.size > MAX_FILE_SIZE) {
+      alert('ไฟล์มีขนาดใหญ่เกินไป (สูงสุด 50MB)');
+      return;
+    }
+
     setFileName(file.name);
 
     if (file.type === 'text/plain') {
+      // Text files - read as text
       const reader = new FileReader();
       reader.onload = (event) => {
         setInputText(event.target?.result as string);
+        setFileData(null);
       };
       reader.readAsText(file);
+    } else if (
+      file.type === 'application/pdf' ||
+      file.type.startsWith('image/')
+    ) {
+      // PDF and images - convert to base64 for Gemini Vision
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = (event.target?.result as string).split(',')[1];
+        setFileData({
+          base64,
+          mimeType: file.type,
+          fileName: file.name
+        });
+        setInputText('');
+      };
+      reader.readAsDataURL(file);
     } else {
-      // For PDF/DOCX/PPTX in this demo environment, we use the filename as a topic trigger
-      // Real implementation would require complex backend or heavy workers
-      setInputText(''); // Clear text to force fallback to filename-based generation
-      alert('สำหรับไฟล์ PDF/DOCX/PPTX ระบบจะใช้ "ชื่อไฟล์" ในการสร้างบทเรียนอัตโนมัตินะคะ!');
+      // Other files (DOCX, PPTX) - use filename only
+      setInputText('');
+      setFileData(null);
     }
   };
 
   // Start Processing
   const handleProcess = async () => {
-    if (!inputText && !fileName) {
+    if (!inputText && !fileName && !fileData) {
       alert("กรุณาใส่เนื้อหาหรืออัปโหลดไฟล์ก่อนนะเด็กๆ");
       return;
     }
 
     setScreen(AppScreen.PROCESSING);
-    setLoadingMessage('ครู AI กำลังอ่านเนื้อหาอยู่จ้า...');
+    setLoadingMessage(fileData ? 'ครู AI กำลังอ่านไฟล์อยู่จ้า...' : 'ครู AI กำลังอ่านเนื้อหาอยู่จ้า...');
 
     try {
-      const summaryResult = await generateSummary(inputText, fileName);
+      const summaryResult = await generateSummary(inputText, fileName, fileData);
       setSummary(summaryResult);
-      
+
       setLoadingMessage('กำลังเตรียมแบบทดสอบสนุกๆ...');
       const quizQuestions = await generateQuiz(summaryResult);
-      
+
       setQuizState({
         questions: quizQuestions,
         currentQuestionIndex: 0,
         score: 0,
         selectedOption: null,
-        showExplanation: false
+        showExplanation: false,
+        attempts: 0
       });
 
       setScreen(AppScreen.SUMMARY);
@@ -80,15 +108,48 @@ const App: React.FC = () => {
 
   // Quiz Logic
   const handleAnswer = (optionIndex: number) => {
-    if (quizState.selectedOption !== null) return; // Prevent double click
+    if (quizState.selectedOption !== null && quizState.showExplanation) return; // Prevent clicking after correctly answering or max attempts
 
-    const isCorrect = optionIndex === quizState.questions[quizState.currentQuestionIndex].correctAnswerIndex;
-    setQuizState(prev => ({
-      ...prev,
-      selectedOption: optionIndex,
-      score: isCorrect ? prev.score + 1 : prev.score,
-      showExplanation: true
-    }));
+    const currentQuestion = quizState.questions[quizState.currentQuestionIndex];
+    const isCorrect = optionIndex === currentQuestion.correctAnswerIndex;
+
+    if (isCorrect) {
+      // User answered correctly
+      setQuizState(prev => ({
+        ...prev,
+        selectedOption: optionIndex,
+        score: prev.score + 1,
+        showExplanation: true, // Show explanation (success state)
+        attempts: 0 // Reset attempts for next logic (though we move on)
+      }));
+    } else {
+      // User answered incorrectly
+      const newAttempts = quizState.attempts + 1;
+
+      if (newAttempts >= 3) {
+        // Max attempts reached -> Show correct answer
+        setQuizState(prev => ({
+          ...prev,
+          selectedOption: optionIndex, // Show their last wrong choice
+          showExplanation: true, // Reveal answer
+          attempts: newAttempts
+        }));
+      } else {
+        // Allow retry
+        setQuizState(prev => ({
+          ...prev,
+          selectedOption: optionIndex, // Briefly show wrong selection
+          attempts: newAttempts
+          // Don't show explanation yet, just hint (handled in render)
+        }));
+
+        // Optional: Auto-clear selection after delay? 
+        // For now, let's keep it simple: User sees red, then clicks another. 
+        // But we need to allow clicking another. 
+        // My current render logic disables buttons if selectedOption !== null.
+        // I should change that to only disable if showExplanation is true.
+      }
+    }
   };
 
   const nextQuestion = () => {
@@ -99,17 +160,20 @@ const App: React.FC = () => {
         ...prev,
         currentQuestionIndex: prev.currentQuestionIndex + 1,
         selectedOption: null,
-        showExplanation: false
+        showExplanation: false,
+        attempts: 0
       }));
     }
   };
 
   // --- Render Views ---
 
+  // ... (renderUpload and renderProcessing match original) ...
+
   const renderUpload = () => (
     <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 max-w-3xl mx-auto">
-      <Mascot emotion="happy" className="mb-8 animate-bounce-slow" />
-      
+      <Mascot emotion="happy" className="w-32 h-32 md:w-48 md:h-48 mb-8 animate-bounce-slow" />
+
       <div className="bg-white rounded-3xl p-8 shadow-xl w-full border-4 border-blue-100">
         <h1 className="text-3xl font-bold text-center text-blue-600 mb-2">ห้องเรียนอัจฉริยะ</h1>
         <p className="text-center text-slate-500 mb-8 fun-font text-lg">
@@ -121,10 +185,10 @@ const App: React.FC = () => {
           <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-blue-300 border-dashed rounded-2xl cursor-pointer bg-blue-50 hover:bg-blue-100 transition-colors group">
             <div className="flex flex-col items-center justify-center pt-5 pb-6">
               <UploadIcon />
-              <p className="mb-2 text-sm text-slate-600 fun-font"><span className="font-semibold">คลิกเพื่อเลือกไฟล์</span> (PDF, DOCX, TXT)</p>
+              <p className="mb-2 text-sm text-slate-600 fun-font"><span className="font-semibold">คลิกเพื่อเลือกไฟล์</span> (PDF, รูปภาพ, TXT)</p>
               <p className="text-xs text-slate-400">หรือลากไฟล์มาวางที่นี่</p>
             </div>
-            <input type="file" className="hidden" accept=".txt,.pdf,.docx,.pptx" onChange={handleFileUpload} />
+            <input type="file" className="hidden" accept=".txt,.pdf,.docx,.pptx,.jpg,.jpeg,.png,.gif,.webp" onChange={handleFileUpload} />
           </label>
 
           {fileName && (
@@ -160,7 +224,7 @@ const App: React.FC = () => {
 
   const renderProcessing = () => (
     <div className="flex flex-col items-center justify-center min-h-[80vh]">
-      <Mascot emotion="thinking" className="animate-pulse mb-8" />
+      <Mascot emotion="thinking" className="w-32 h-32 md:w-48 md:h-48 animate-pulse mb-8" />
       <h2 className="text-2xl font-bold text-slate-700 fun-font animate-pulse">{loadingMessage}</h2>
       <div className="mt-8 w-64 h-4 bg-slate-200 rounded-full overflow-hidden">
         <div className="h-full bg-blue-500 animate-[width_2s_ease-in-out_infinite]" style={{ width: '80%' }}></div>
@@ -176,7 +240,7 @@ const App: React.FC = () => {
           <Button variant="outline" onClick={() => setScreen(AppScreen.UPLOAD)}>← หน้าแรก</Button>
           <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm">
             <span className="text-2xl">📚</span>
-            <span className="font-bold text-blue-600 fun-font">สรุปบทเรียน</span>
+            <span className="font-bold text-blue-600 fun-font">เนื้อหาบทเรียน</span>
           </div>
         </div>
 
@@ -185,34 +249,74 @@ const App: React.FC = () => {
             <h1 className="text-2xl md:text-3xl font-bold text-yellow-900">{summary.originalTopic}</h1>
             <Mascot emotion="happy" className="w-16 h-16 md:w-20 md:h-20" />
           </div>
-          
-          <div className="p-6 md:p-10 space-y-8">
-            <div className="prose prose-lg max-w-none">
-              <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100">
-                <h3 className="text-xl font-bold text-blue-700 mb-4 fun-font">📝 เนื้อหาสาระ</h3>
-                <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{summary.summaryContent}</p>
-              </div>
 
-              <div className="bg-green-50 p-6 rounded-2xl border border-green-100 mt-6">
-                <h3 className="text-xl font-bold text-green-700 mb-4 fun-font">🔑 จำให้แม่น (Key Points)</h3>
-                <ul className="space-y-3">
-                  {summary.keyPoints.map((point, idx) => (
-                    <li key={idx} className="flex items-start">
-                      <span className="inline-flex items-center justify-center w-6 h-6 mr-3 text-sm font-bold text-green-600 bg-green-200 rounded-full flex-shrink-0">
-                        {idx + 1}
-                      </span>
-                      <span className="text-slate-700">{point}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <div className="p-6 md:p-10 space-y-6">
+            {/* บทนำ */}
+            <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100">
+              <h3 className="text-xl font-bold text-blue-700 mb-4 fun-font">📖 บทนำ</h3>
+              <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{summary.introduction}</p>
             </div>
+
+            {/* หัวข้อย่อย */}
+            {summary.sections.map((section, idx) => (
+              <div key={idx} className="bg-purple-50 p-6 rounded-2xl border border-purple-100">
+                <h3 className="text-xl font-bold text-purple-700 mb-4 fun-font">
+                  <span className="inline-flex items-center justify-center w-8 h-8 mr-2 text-sm font-bold text-white bg-purple-500 rounded-full">
+                    {idx + 1}
+                  </span>
+                  {section.title}
+                </h3>
+                <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{section.content}</p>
+              </div>
+            ))}
+
+            {/* ตัวอย่างในชีวิตจริง */}
+            <div className="bg-orange-50 p-6 rounded-2xl border border-orange-100">
+              <h3 className="text-xl font-bold text-orange-700 mb-4 fun-font">💡 ตัวอย่างในชีวิตจริง</h3>
+              <ul className="space-y-3">
+                {summary.examples.map((example, idx) => (
+                  <li key={idx} className="flex items-start">
+                    <span className="text-orange-500 mr-3 text-xl">•</span>
+                    <span className="text-slate-700">{example}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Infographic */}
+            {summary.infographicSvg && (
+              <div className="bg-pink-50 p-6 rounded-2xl border border-pink-100 overflow-hidden">
+                <h3 className="text-xl font-bold text-pink-700 mb-4 fun-font">🎨 แผนภาพช่วยจำ (Infographic)</h3>
+                <div
+                  className="w-full bg-white rounded-xl shadow-inner p-4 flex justify-center overflow-x-auto"
+                  dangerouslySetInnerHTML={{ __html: summary.infographicSvg }}
+                />
+              </div>
+            )}
+
+            {/* สรุปประเด็นสำคัญ */}
+            <div className="bg-green-50 p-6 rounded-2xl border border-green-100">
+              <h3 className="text-xl font-bold text-green-700 mb-4 fun-font">🔑 จำให้แม่น (Key Points)</h3>
+              <ul className="space-y-3">
+                {summary.keyPoints.map((point, idx) => (
+                  <li key={idx} className="flex items-start">
+                    <span className="inline-flex items-center justify-center w-6 h-6 mr-3 text-sm font-bold text-green-600 bg-green-200 rounded-full flex-shrink-0">
+                      {idx + 1}
+                    </span>
+                    <span className="text-slate-700">{point}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Chat with Teacher */}
+            <ChatBot summary={summary} />
           </div>
 
           <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-center sticky bottom-0 z-10">
-             <Button variant="success" className="text-xl px-12 py-4 shadow-xl" onClick={() => setScreen(AppScreen.QUIZ)}>
-               📝 ไปทำแบบทดสอบ (10 ข้อ)
-             </Button>
+            <Button variant="success" className="text-xl px-12 py-4 shadow-xl" onClick={() => setScreen(AppScreen.QUIZ)}>
+              📝 ไปทำแบบทดสอบ (10 ข้อ)
+            </Button>
           </div>
         </div>
       </div>
@@ -223,69 +327,113 @@ const App: React.FC = () => {
     const question = quizState.questions[quizState.currentQuestionIndex];
     if (!question) return null;
 
+    // Determine current state logic
+    const isCompleted = quizState.showExplanation; // True if answered correctly OR max attempts reached
+    const isWrong = !isCompleted && quizState.attempts > 0; // True if currently in retry mode
+
     return (
       <div className="max-w-3xl mx-auto min-h-[90vh] flex flex-col justify-center px-4 py-8">
-         <div className="flex justify-between items-center mb-6">
-            <div className="bg-white px-4 py-2 rounded-xl shadow-sm font-bold text-slate-600">
-              ข้อที่ {quizState.currentQuestionIndex + 1} / {quizState.questions.length}
-            </div>
-            <div className="bg-white px-4 py-2 rounded-xl shadow-sm font-bold text-blue-600">
-              คะแนน: {quizState.score}
-            </div>
-         </div>
+        <div className="flex justify-between items-center mb-6">
+          <div className="bg-white px-4 py-2 rounded-xl shadow-sm font-bold text-slate-600">
+            ข้อที่ {quizState.currentQuestionIndex + 1} / {quizState.questions.length}
+          </div>
+          <div className="bg-white px-4 py-2 rounded-xl shadow-sm font-bold text-blue-600">
+            คะแนน: {quizState.score}
+          </div>
+        </div>
 
-         <div className="bg-white rounded-3xl shadow-xl overflow-hidden border-b-8 border-blue-200">
-            <div className="p-8 md:p-10">
-              <h2 className="text-2xl md:text-3xl font-bold text-slate-800 mb-8 leading-snug">
-                {question.question}
-              </h2>
-
-              <div className="grid gap-4">
-                {question.options.map((option, idx) => {
-                  let btnClass = "bg-slate-50 border-2 border-slate-200 hover:border-blue-300";
-                  if (quizState.selectedOption !== null) {
-                    if (idx === question.correctAnswerIndex) btnClass = "bg-green-100 border-green-500 text-green-800";
-                    else if (idx === quizState.selectedOption) btnClass = "bg-red-100 border-red-500 text-red-800";
-                    else btnClass = "opacity-50";
-                  }
-
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => handleAnswer(idx)}
-                      disabled={quizState.selectedOption !== null}
-                      className={`text-left p-5 rounded-xl text-lg transition-all fun-font ${btnClass}`}
-                    >
-                      <span className="font-bold mr-3 opacity-60">{['ก', 'ข', 'ค', 'ง'][idx]}.</span>
-                      {option}
-                    </button>
-                  );
-                })}
+        <div className={`bg-white rounded-3xl shadow-xl overflow-hidden border-b-8 transition-colors duration-500 ${isWrong ? 'border-orange-200' : 'border-blue-200'}`}>
+          <div className="p-8 md:p-10">
+            {/* Mascot & Question Header */}
+            <div className="flex items-center gap-4 mb-6">
+              <Mascot
+                emotion={isCompleted ? 'excited' : isWrong ? 'sad' : 'thinking'}
+                className="w-20 h-20 flex-shrink-0"
+              />
+              <div>
+                {isWrong && (
+                  <div className="text-orange-500 font-bold mb-1 animate-pulse">
+                    ฮึบๆ อีกนิดเดียว! (ลองผิดไป {quizState.attempts} ครั้ง)
+                  </div>
+                )}
+                <h2 className="text-xl md:text-2xl font-bold text-slate-800 leading-snug">
+                  {question.question}
+                </h2>
               </div>
+            </div>
 
-              {quizState.showExplanation && (
-                <div className="mt-8 p-4 bg-yellow-50 rounded-xl border border-yellow-200 animate-fade-in">
-                  <div className="flex items-start gap-3">
-                    <Mascot emotion="happy" className="w-12 h-12 flex-shrink-0" />
-                    <div>
-                      <h4 className="font-bold text-yellow-800 mb-1">เฉลย:</h4>
-                      <p className="text-yellow-900">{question.explanation}</p>
-                    </div>
+            {/* Options */}
+            <div className="grid gap-4">
+              {question.options.map((option, idx) => {
+                let btnClass = "bg-slate-50 border-2 border-slate-200 hover:border-blue-300";
+
+                // Visual Logic
+                if (quizState.selectedOption === idx) {
+                  // This option was selected
+                  if (isCompleted) {
+                    // If round is over, check correctness
+                    if (idx === question.correctAnswerIndex) btnClass = "bg-green-100 border-green-500 text-green-800";
+                    else btnClass = "bg-red-100 border-red-500 text-red-800";
+                  } else if (isWrong) {
+                    // Currently trying, and this was the last wrong pick
+                    btnClass = "bg-red-50 border-red-300 text-red-500";
+                  }
+                } else if (isCompleted && idx === question.correctAnswerIndex) {
+                  // Show correct answer even if not selected
+                  btnClass = "bg-green-100 border-green-500 text-green-800 ring-2 ring-green-200";
+                }
+
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => handleAnswer(idx)}
+                    disabled={isCompleted} // Disable only when round is fully over
+                    className={`text-left p-5 rounded-xl text-lg transition-all fun-font ${btnClass}`}
+                  >
+                    <span className="font-bold mr-3 opacity-60">{['ก', 'ข', 'ค', 'ง'][idx]}.</span>
+                    {option}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Hint Section (Show when wrong but not yet max attempts) */}
+            {isWrong && question.hint && (
+              <div className="mt-6 p-4 bg-orange-50 rounded-xl border border-orange-200 animate-slide-up">
+                <div className="flex items-center gap-2 text-orange-700">
+                  <span className="text-2xl">💡</span>
+                  <span className="font-bold">คำใบ้จ้า:</span>
+                  <span>{question.hint}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Explanation Section (Show when completed) */}
+            {quizState.showExplanation && (
+              <div className={`mt-8 p-4 rounded-xl border animate-fade-in ${quizState.selectedOption === question.correctAnswerIndex ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                <div className="flex items-start gap-3">
+                  <Mascot emotion={quizState.selectedOption === question.correctAnswerIndex ? 'excited' : 'neutral'} className="w-12 h-12 flex-shrink-0" />
+                  <div>
+                    <h4 className={`font-bold mb-1 ${quizState.selectedOption === question.correctAnswerIndex ? 'text-green-800' : 'text-red-800'}`}>
+                      {quizState.selectedOption === question.correctAnswerIndex ? 'เก่งมาก!' : 'เฉลย:'}
+                    </h4>
+                    <p className="text-slate-800">{question.explanation}</p>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
 
-            <div className="p-4 bg-slate-50 flex justify-end">
-              <Button 
-                onClick={nextQuestion} 
-                disabled={quizState.selectedOption === null}
-                className="px-8"
-              >
-                {quizState.currentQuestionIndex === quizState.questions.length - 1 ? 'ดูผลสอบ 🏆' : 'ข้อต่อไป ➡️'}
-              </Button>
-            </div>
-         </div>
+          <div className="p-4 bg-slate-50 flex justify-end">
+            <Button
+              onClick={nextQuestion}
+              disabled={!isCompleted} // Only can go next if round is over
+              className="px-8"
+            >
+              {quizState.currentQuestionIndex === quizState.questions.length - 1 ? 'ดูผลสอบ 🏆' : 'ข้อต่อไป ➡️'}
+            </Button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -302,54 +450,55 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
         {percentage >= 80 && (
-           <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-             {[...Array(20)].map((_, i) => (
-               <div key={i} className="absolute text-4xl animate-[spin_3s_linear_infinite]" 
-                    style={{
-                      left: `${Math.random() * 100}%`, 
-                      top: `-10%`,
-                      animationDuration: `${Math.random() * 3 + 2}s`,
-                      animationDelay: `${Math.random() * 2}s`
-                    }}>
-                 🎉
-               </div>
-             ))}
-           </div>
+          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+            {[...Array(20)].map((_, i) => (
+              <div key={i} className="absolute text-4xl animate-[spin_3s_linear_infinite]"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  top: `-10%`,
+                  animationDuration: `${Math.random() * 3 + 2}s`,
+                  animationDelay: `${Math.random() * 2}s`
+                }}>
+                🎉
+              </div>
+            ))}
+          </div>
         )}
-        
+
         <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-md w-full text-center relative z-10 border-8 border-yellow-200">
           <Mascot emotion={emotion} className="w-32 h-32 mx-auto mb-6" />
-          
+
           <h1 className="text-4xl font-bold text-slate-800 mb-2 fun-font">
             {quizState.score} / {quizState.questions.length}
           </h1>
           <p className="text-slate-500 mb-6 text-lg">คะแนนของคุณ</p>
-          
+
           <div className="bg-slate-100 rounded-xl p-4 mb-8">
             <h3 className="text-xl font-bold text-blue-600 mb-2">{message}</h3>
             <div className="w-full bg-slate-300 rounded-full h-4 overflow-hidden">
-              <div 
-                className={`h-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-400' : 'bg-red-400'} transition-all duration-1000 ease-out`} 
+              <div
+                className={`h-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-400' : 'bg-red-400'} transition-all duration-1000 ease-out`}
                 style={{ width: `${percentage}%` }}
               ></div>
             </div>
           </div>
 
           <div className="space-y-3">
-             <Button fullWidth onClick={() => {
-               setScreen(AppScreen.SUMMARY);
-               setQuizState(prev => ({ ...prev, currentQuestionIndex: 0, score: 0, selectedOption: null, showExplanation: false }));
-             }}>
-               📖 ทบทวนบทเรียนอีกครั้ง
-             </Button>
-             <Button fullWidth variant="secondary" onClick={() => {
-               setScreen(AppScreen.UPLOAD);
-               setSummary(null);
-               setInputText('');
-               setFileName(undefined);
-             }}>
-               🏠 เริ่มบทเรียนใหม่
-             </Button>
+            <Button fullWidth onClick={() => {
+              setScreen(AppScreen.SUMMARY);
+              setQuizState(prev => ({ ...prev, currentQuestionIndex: 0, score: 0, selectedOption: null, showExplanation: false }));
+            }}>
+              📖 ทบทวนบทเรียนอีกครั้ง
+            </Button>
+            <Button fullWidth variant="secondary" onClick={() => {
+              setScreen(AppScreen.UPLOAD);
+              setSummary(null);
+              setInputText('');
+              setFileName(undefined);
+              setFileData(null);
+            }}>
+              🏠 เริ่มบทเรียนใหม่
+            </Button>
           </div>
         </div>
       </div>

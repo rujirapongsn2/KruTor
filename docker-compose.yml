@@ -1,0 +1,35 @@
+services:
+  kruai:
+    build:
+      context: .
+      args:
+        GEMINI_API_KEY: ${GEMINI_API_KEY}
+    container_name: kruai-app
+    ports:
+      - "3000:80"
+    volumes:
+      - kruai-uploads:/app/uploads
+      - kruai-data:/app/data
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    restart: unless-stopped
+
+  # Optional: ngrok tunnel
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: kruai-ngrok
+    command: http kruai:80 --log stdout
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    depends_on:
+      - kruai
+    profiles:
+      - tunnel
+
+volumes:
+  kruai-uploads:
+    driver: local
+  kruai-data:
+    driver: local
