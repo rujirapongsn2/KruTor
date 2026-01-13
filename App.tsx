@@ -88,6 +88,37 @@ const App: React.FC = () => {
     });
   };
 
+  const handleGoToQuiz = async () => {
+    if (quizState.questions.length > 0) {
+      setScreen(AppScreen.QUIZ);
+      return;
+    }
+
+    if (!summary) return;
+
+    setScreen(AppScreen.PROCESSING);
+    setLoadingMessage('กำลังเตรียมแบบทดสอบสนุกๆ...');
+    try {
+      const quizQuestions = await generateQuiz(summary);
+      setQuizState({
+        questions: quizQuestions,
+        currentQuestionIndex: 0,
+        score: 0,
+        selectedOption: null,
+        showExplanation: false,
+        attempts: 0,
+        userAnswers: new Array(quizQuestions.length).fill(null)
+      });
+      setScreen(AppScreen.QUIZ);
+    } catch (error) {
+      console.error(error);
+      alert('สร้างแบบทดสอบไม่สำเร็จ T_T');
+      setScreen(AppScreen.SUMMARY);
+    } finally {
+      setLoadingMessage('');
+    }
+  };
+
   if (!user) {
     return <ProfileSelector onUserSelected={setUser} />;
   }
@@ -560,7 +591,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-center sticky bottom-0 z-10">
-            <Button variant="success" className="text-xl px-12 py-4 shadow-xl" onClick={() => setScreen(AppScreen.QUIZ)}>
+            <Button variant="success" className="text-xl px-12 py-4 shadow-xl" onClick={handleGoToQuiz}>
               📝 ไปทำแบบทดสอบ (10 ข้อ)
             </Button>
           </div>
