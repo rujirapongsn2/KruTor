@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { AppScreen, SummaryData, QuizState, FileData } from './types';
 import { generateSummary, generateQuiz } from './services/geminiService';
+import { apiService, User, SummaryRecord, QuizRecord } from './services/apiService';
+import ProfileSelector from './components/ProfileSelector';
+import ReactMarkdown from 'react-markdown';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 import Mascot from './components/Mascot';
@@ -25,9 +28,69 @@ const App: React.FC = () => {
     currentQuestionIndex: 0,
     score: 0,
     selectedOption: null,
-    showExplanation: false
+    showExplanation: false,
+    attempts: 0,
+    userAnswers: []
   });
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [reviewData, setReviewData] = useState<QuizRecord | null>(null);
+
+  // User & Data State
+  const [user, setUser] = useState<User | null>(null);
+  const [savedSummaries, setSavedSummaries] = useState<SummaryRecord[]>([]);
+  const [quizHistory, setQuizHistory] = useState<QuizRecord[]>([]);
+  const [viewMode, setViewMode] = useState<'create' | 'saved' | 'history'>('create');
+
+  useEffect(() => {
+    if (user) {
+      loadUserData();
+    }
+  }, [user]);
+
+  const loadUserData = async () => {
+    if (!user) return;
+    try {
+      const summaries = await apiService.getSummaries(user.id);
+      setSavedSummaries(summaries);
+      const history = await apiService.getQuizHistory(user.id);
+      setQuizHistory(history);
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
+
+  const handleSaveSummary = async () => {
+    if (!user || !summary) return;
+    try {
+      setLoadingMessage('กำลังบันทึก...');
+      await apiService.saveSummary(user.id, summary.originalTopic, summary);
+      alert('บันทึกบทเรียนเรียบร้อยจ้า! 💾');
+      loadUserData();
+    } catch (error) {
+      alert('บันทึกไม่สำเร็จ T_T');
+    } finally {
+      setLoadingMessage('');
+    }
+  };
+
+  const handleLoadSummary = (record: SummaryRecord) => {
+    setSummary(record.content);
+    setScreen(AppScreen.SUMMARY);
+    // Reset quiz state when loading a summary
+    setQuizState({
+      questions: [],
+      currentQuestionIndex: 0,
+      score: 0,
+      selectedOption: null,
+      showExplanation: false,
+      attempts: 0,
+      userAnswers: []
+    });
+  };
+
+  if (!user) {
+    return <ProfileSelector onUserSelected={setUser} />;
+  }
 
   // Handle File Input
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -84,7 +147,7 @@ const App: React.FC = () => {
     setLoadingMessage(fileData ? 'ครู AI กำลังอ่านไฟล์อยู่จ้า...' : 'ครู AI กำลังอ่านเนื้อหาอยู่จ้า...');
 
     try {
-      const summaryResult = await generateSummary(inputText, fileName, fileData);
+      const summaryResult = await generateSummary(inputText, fileName, fileData, user?.summary_style);
       setSummary(summaryResult);
 
       setLoadingMessage('กำลังเตรียมแบบทดสอบสนุกๆ...');
@@ -96,7 +159,8 @@ const App: React.FC = () => {
         score: 0,
         selectedOption: null,
         showExplanation: false,
-        attempts: 0
+        attempts: 0,
+        userAnswers: []
       });
 
       setScreen(AppScreen.SUMMARY);
@@ -115,45 +179,84 @@ const App: React.FC = () => {
 
     if (isCorrect) {
       // User answered correctly
-      setQuizState(prev => ({
-        ...prev,
-        selectedOption: optionIndex,
-        score: prev.score + 1,
-        showExplanation: true, // Show explanation (success state)
-        attempts: 0 // Reset attempts for next logic (though we move on)
-      }));
+      setQuizState(prev => {
+        const newUserAnswers = [...prev.userAnswers];
+        newUserAnswers[prev.currentQuestionIndex] = optionIndex; // Track answer
+        return {
+          ...prev,
+          selectedOption: optionIndex,
+          score: prev.score + 1,
+          showExplanation: true,
+          attempts: 0,
+          userAnswers: newUserAnswers
+        };
+      });
     } else {
       // User answered incorrectly
       const newAttempts = quizState.attempts + 1;
 
       if (newAttempts >= 3) {
-        // Max attempts reached -> Show correct answer
-        setQuizState(prev => ({
-          ...prev,
-          selectedOption: optionIndex, // Show their last wrong choice
-          showExplanation: true, // Reveal answer
-          attempts: newAttempts
-        }));
+        // Max attempts reached
+        setQuizState(prev => {
+          const newUserAnswers = [...prev.userAnswers];
+          // If they failed, we might want to record their last wrong answer or null (failed).
+          // Let's record the last selected option (which was wrong) 
+          newUserAnswers[prev.currentQuestionIndex] = optionIndex;
+          return {
+            ...prev,
+            selectedOption: optionIndex,
+            showExplanation: true,
+            attempts: newAttempts,
+            userAnswers: newUserAnswers
+          };
+        });
       } else {
-        // Allow retry
-        setQuizState(prev => ({
-          ...prev,
-          selectedOption: optionIndex, // Briefly show wrong selection
-          attempts: newAttempts
-          // Don't show explanation yet, just hint (handled in render)
-        }));
-
-        // Optional: Auto-clear selection after delay? 
-        // For now, let's keep it simple: User sees red, then clicks another. 
-        // But we need to allow clicking another. 
-        // My current render logic disables buttons if selectedOption !== null.
-        // I should change that to only disable if showExplanation is true.
+        // Retry logic - don't record final answer yet?
+        // Actually we only want to record the "final" decision or the "first" attempt?
+        // Requirement says "see items they got wrong".
+        // Usually we record the *submitted* answer. 
+        // If we allow retries, what is the "answer"? 
+        // Let's assume the answer that triggered the "next" or "completion" is the one.
+        // But here we just update state for visual feedback.
+        // We will update the userAnswers ONLY when we move to the next state or finish the question.
+        // Actually, let's just track the *last selected* option for the question index.
+        setQuizState(prev => {
+          // Don't update userAnswers array yet if we are allowing retry? 
+          // If we want to show they got it wrong, we should maybe record it.
+          // However, if they eventually get it right, does it count as wrong?
+          // The score logic (isCorrect) increments score only if they get it right.
+          // If they run out of attempts, they don't get score.
+          // So `userAnswers` should reflect their final committed answer for that question.
+          return {
+            ...prev,
+            selectedOption: optionIndex,
+            attempts: newAttempts
+            // userAnswers NOT updated here, wait until completed?
+            // Actually, for the "failed" case above, we updated it.
+          };
+        });
       }
     }
   };
 
   const nextQuestion = () => {
     if (quizState.currentQuestionIndex >= quizState.questions.length - 1) {
+      // Finished
+      if (user) {
+        // Ensure the last question's answer is recorded if it wasn't already 
+        // (handleAnswer updates it for success/fail cases).
+
+        apiService.saveQuizResult(
+          user.id,
+          quizState.score,
+          quizState.questions.length,
+          {
+            topic: summary?.originalTopic,
+            questions: quizState.questions, // Save full questions
+            userAnswers: quizState.userAnswers // Save user answers
+          }
+        ).then(() => loadUserData());
+      }
       setScreen(AppScreen.RESULT);
     } else {
       setQuizState(prev => ({
@@ -171,53 +274,178 @@ const App: React.FC = () => {
   // ... (renderUpload and renderProcessing match original) ...
 
   const renderUpload = () => (
-    <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 max-w-3xl mx-auto">
-      <Mascot emotion="happy" className="w-32 h-32 md:w-48 md:h-48 mb-8 animate-bounce-slow" />
+    <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 max-w-4xl mx-auto py-10">
 
-      <div className="bg-white rounded-3xl p-8 shadow-xl w-full border-4 border-blue-100">
-        <h1 className="text-3xl font-bold text-center text-blue-600 mb-2">ห้องเรียนอัจฉริยะ</h1>
-        <p className="text-center text-slate-500 mb-8 fun-font text-lg">
-          อัปโหลดเอกสารการเรียน หรือวางเนื้อหาที่นี่ ให้ครู AI ช่วยสรุปและติวสอบให้!
-        </p>
-
-        <div className="space-y-6">
-          {/* File Dropzone */}
-          <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-blue-300 border-dashed rounded-2xl cursor-pointer bg-blue-50 hover:bg-blue-100 transition-colors group">
-            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-              <UploadIcon />
-              <p className="mb-2 text-sm text-slate-600 fun-font"><span className="font-semibold">คลิกเพื่อเลือกไฟล์</span> (PDF, รูปภาพ, TXT)</p>
-              <p className="text-xs text-slate-400">หรือลากไฟล์มาวางที่นี่</p>
-            </div>
-            <input type="file" className="hidden" accept=".txt,.pdf,.docx,.pptx,.jpg,.jpeg,.png,.gif,.webp" onChange={handleFileUpload} />
-          </label>
-
-          {fileName && (
-            <div className="bg-green-100 p-3 rounded-xl flex items-center text-green-700">
-              <span className="mr-2">📎</span>
-              <span className="font-semibold truncate">{fileName}</span>
-            </div>
-          )}
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200"></div>
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white text-slate-500 fun-font">หรือ พิมพ์เนื้อหา</span>
+      {/* Header Profile */}
+      <div className="w-full flex justify-between items-center mb-10 bg-white p-4 rounded-2xl shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-2xl">
+            🧒
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-700">น้อง{user.nickname} ({user.grade})</h3>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-slate-500">รูปแบบการสอน:</span>
+              <button
+                onClick={async () => {
+                  try {
+                    const newStyle = user.summary_style === 'SHORT' ? 'DETAILED' : 'SHORT';
+                    const updatedUser = await apiService.updateUser(user.id, newStyle);
+                    setUser(updatedUser);
+                  } catch (e) {
+                    alert('ไม่สามารถเปลี่ยนรูปแบบได้');
+                  }
+                }}
+                className={`text-xs px-2 py-0.5 rounded-full font-bold border transition-all ${user.summary_style === 'SHORT'
+                  ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
+                  : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200'
+                  }`}
+              >
+                {user.summary_style === 'SHORT' ? '⚡️ แบบสั้น (เปลี่ยน)' : '📚 แบบละเอียด (เปลี่ยน)'}
+              </button>
             </div>
           </div>
-
-          <textarea
-            className="w-full p-4 rounded-xl border-2 border-slate-200 focus:border-blue-400 focus:ring focus:ring-blue-200 transition-all min-h-[150px] resize-none fun-font"
-            placeholder="วางเนื้อหาบทเรียนที่ต้องการสรุปที่นี่..."
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-          ></textarea>
-
-          <Button fullWidth onClick={handleProcess} disabled={!inputText && !fileName} className="text-xl py-4">
-            🚀 เริ่มเรียนรู้กันเลย!
-          </Button>
         </div>
+        <button onClick={() => setUser(null)} className="text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg text-sm font-bold">
+          ออก
+        </button>
+      </div>
+
+      <Mascot emotion="happy" className="w-32 h-32 md:w-48 md:h-48 mb-8 animate-bounce-slow" />
+
+      {/* Tabs */}
+      <div className="flex space-x-2 mb-6 bg-white p-2 rounded-xl shadow-sm">
+        <button
+          onClick={() => setViewMode('create')}
+          className={`px-6 py-2 rounded-lg transition-all font-bold ${viewMode === 'create' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          🚀 บทเรียนใหม่
+        </button>
+        <button
+          onClick={() => setViewMode('saved')}
+          className={`px-6 py-2 rounded-lg transition-all font-bold ${viewMode === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          📚 บทเรียนที่บันทึก ({savedSummaries.length})
+        </button>
+        <button
+          onClick={() => setViewMode('history')}
+          className={`px-6 py-2 rounded-lg transition-all font-bold ${viewMode === 'history' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          🏆 ผลสอบ ({quizHistory.length})
+        </button>
+      </div>
+
+      <div className="bg-white rounded-3xl p-8 shadow-xl w-full border-4 border-blue-100 min-h-[400px]">
+
+        {viewMode === 'create' && (
+          <div className="space-y-6 animate-fade-in">
+            <h1 className="text-3xl font-bold text-center text-blue-600 mb-2">ห้องเรียนอัจฉริยะ</h1>
+            <p className="text-center text-slate-500 mb-8 fun-font text-lg">
+              อัปโหลดเอกสารการเรียน หรือวางเนื้อหาที่นี่ ให้ครู AI ช่วยสรุปและติวสอบให้!
+            </p>
+
+            {/* File Dropzone */}
+            <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-blue-300 border-dashed rounded-2xl cursor-pointer bg-blue-50 hover:bg-blue-100 transition-colors group">
+              <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                <UploadIcon />
+                <p className="mb-2 text-sm text-slate-600 fun-font"><span className="font-semibold">คลิกเพื่อเลือกไฟล์</span> (PDF, รูปภาพ, TXT)</p>
+                <p className="text-xs text-slate-400">หรือลากไฟล์มาวางที่นี่</p>
+              </div>
+              <input type="file" className="hidden" accept=".txt,.pdf,.docx,.pptx,.jpg,.jpeg,.png,.gif,.webp" onChange={handleFileUpload} />
+            </label>
+
+            {fileName && (
+              <div className="bg-green-100 p-3 rounded-xl flex items-center text-green-700">
+                <span className="mr-2">📎</span>
+                <span className="font-semibold truncate">{fileName}</span>
+              </div>
+            )}
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-200"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-slate-500 fun-font">หรือ พิมพ์เนื้อหา</span>
+              </div>
+            </div>
+
+            <textarea
+              className="w-full p-4 rounded-xl border-2 border-slate-200 focus:border-blue-400 focus:ring focus:ring-blue-200 transition-all min-h-[150px] resize-none fun-font"
+              placeholder="วางเนื้อหาบทเรียนที่ต้องการสรุปที่นี่..."
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+            ></textarea>
+
+            <Button fullWidth onClick={handleProcess} disabled={!inputText && !fileName} className="text-xl py-4">
+              🚀 เริ่มเรียนรู้กันเลย!
+            </Button>
+          </div>
+        )}
+
+        {viewMode === 'saved' && (
+          <div className="space-y-4 animate-fade-in">
+            <h2 className="text-2xl font-bold text-purple-700 mb-6">บทเรียนของฉัน</h2>
+            {savedSummaries.length === 0 ? (
+              <p className="text-center text-slate-400 custom-bounce py-10">ยังไม่มีบทเรียนที่บันทึกไว้จ้า 😅</p>
+            ) : (
+              <div className="grid gap-4">
+                {savedSummaries.map((record) => (
+                  <div key={record.id} className="border-2 border-purple-100 rounded-xl p-4 hover:border-purple-300 transition-all flex justify-between items-center group">
+                    <div>
+                      <h3 className="font-bold text-lg text-slate-800 group-hover:text-purple-700">{record.title}</h3>
+                      <p className="text-sm text-slate-400">{new Date(record.created_at).toLocaleString('th-TH')}</p>
+                    </div>
+                    <button
+                      onClick={() => handleLoadSummary(record)}
+                      className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 font-bold"
+                    >
+                      อ่านทบทวน 📖
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {viewMode === 'history' && (
+          <div className="space-y-4 animate-fade-in">
+            <h2 className="text-2xl font-bold text-amber-700 mb-6">ประวัติการสอบ</h2>
+            {quizHistory.length === 0 ? (
+              <p className="text-center text-slate-400 custom-bounce py-10">ยังไม่เคยทำแบบทดสอบเลย มาลองทำกันเถอะ! 📝</p>
+            ) : (
+              <div className="grid gap-4">
+                {quizHistory.map((record) => (
+                  <div
+                    key={record.id}
+                    onClick={() => {
+                      if (record.details?.questions) {
+                        setReviewData(record);
+                        setScreen(AppScreen.REVIEW);
+                      } else {
+                        alert('ขออภัย ข้อมูลเฉลยของชุดนี้ไม่ได้ถูกบันทึกไว้ (อาจเป็นข้อมูลเก่า)');
+                      }
+                    }}
+                    className="border-2 border-amber-100 rounded-xl p-4 hover:border-amber-300 transition-all flex justify-between items-center bg-amber-50 cursor-pointer hover:shadow-md"
+                  >
+                    <div>
+                      <h3 className="font-bold text-lg text-slate-800">{record.details?.topic || 'แบบทดสอบ'}</h3>
+                      <p className="text-sm text-slate-400">{new Date(record.timestamp).toLocaleString('th-TH')}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-2xl font-bold ${record.score / record.total_questions >= 0.8 ? 'text-green-600' : record.score / record.total_questions >= 0.5 ? 'text-amber-600' : 'text-red-500'}`}>
+                        {record.score}/{record.total_questions}
+                      </span>
+                      <p className="text-xs text-slate-500">คะแนน (คลิกเพื่อดูเฉลย)</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );
@@ -238,9 +466,17 @@ const App: React.FC = () => {
       <div className="max-w-4xl mx-auto pb-20 px-4 pt-8">
         <div className="flex justify-between items-center mb-6">
           <Button variant="outline" onClick={() => setScreen(AppScreen.UPLOAD)}>← หน้าแรก</Button>
-          <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm">
-            <span className="text-2xl">📚</span>
-            <span className="font-bold text-blue-600 fun-font">เนื้อหาบทเรียน</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSaveSummary}
+              className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-4 py-2 rounded-full shadow-sm font-bold flex items-center gap-2 transition-all"
+            >
+              💾 บันทึกไว้อ่าน
+            </button>
+            <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm">
+              <span className="text-2xl">📚</span>
+              <span className="font-bold text-blue-600 fun-font">เนื้อหาบทเรียน</span>
+            </div>
           </div>
         </div>
 
@@ -266,7 +502,17 @@ const App: React.FC = () => {
                   </span>
                   {section.title}
                 </h3>
-                <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{section.content}</p>
+                <ReactMarkdown
+                  components={{
+                    strong: ({ node, ...props }) => <span className="bg-yellow-200 text-yellow-900 px-1 rounded mx-0.5 font-bold shadow-sm" {...props} />,
+                    p: ({ node, ...props }) => <p className="mb-4 text-slate-700 leading-relaxed text-lg" {...props} />,
+                    ul: ({ node, ...props }) => <ul className="list-disc list-inside space-y-2 mb-4 ml-4" {...props} />,
+                    ol: ({ node, ...props }) => <ol className="list-decimal list-inside space-y-2 mb-4 ml-4" {...props} />,
+                    li: ({ node, ...props }) => <li className="text-slate-700" {...props} />,
+                  }}
+                >
+                  {section.content}
+                </ReactMarkdown>
               </div>
             ))}
 
@@ -438,6 +684,82 @@ const App: React.FC = () => {
     );
   };
 
+  const renderReview = () => {
+    if (!reviewData || !reviewData.details?.questions) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen">
+          <p>ไม่พบข้อมูลการสอบนี้ (อาจจะเป็นข้อมูลเก่า)</p>
+          <Button onClick={() => setScreen(AppScreen.UPLOAD)}>กลับ</Button>
+        </div>
+      );
+    }
+
+    const { questions, userAnswers } = reviewData.details;
+
+    return (
+      <div className="max-w-4xl mx-auto pb-20 px-4 pt-8">
+        <div className="flex justify-between items-center mb-6">
+          <Button variant="outline" onClick={() => setScreen(AppScreen.UPLOAD)}>← กลับหน้าแรก</Button>
+          <div className="bg-white px-4 py-2 rounded-xl shadow-sm font-bold text-amber-600">
+            เฉลยข้อสอบ 📝
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl shadow-xl overflow-hidden border-4 border-amber-100 p-6 md:p-10 space-y-8">
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-slate-800">{reviewData.details.topic || 'แบบทดสอบ'}</h2>
+            <p className="text-slate-500">
+              คะแนนของคุณ: {reviewData.score} / {reviewData.total_questions}
+            </p>
+          </div>
+
+          {questions.map((q: any, idx: number) => {
+            const userAnswerIdx = userAnswers ? userAnswers[idx] : null;
+            const isCorrect = userAnswerIdx === q.correctAnswerIndex;
+
+            return (
+              <div key={idx} className={`border-2 rounded-2xl p-6 ${isCorrect ? 'border-green-100 bg-green-50' : 'border-red-100 bg-red-50'}`}>
+                <div className="flex gap-3 mb-4">
+                  <div className={`w-8 h-8 flex items-center justify-center rounded-full font-bold flex-shrink-0 ${isCorrect ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+                    {idx + 1}
+                  </div>
+                  <h3 className="font-bold text-slate-800 text-lg">{q.question}</h3>
+                </div>
+
+                <div className="grid gap-2 ml-11 mb-4">
+                  {q.options.map((opt: string, optIdx: number) => {
+                    let optionClass = "p-3 rounded-lg border ";
+                    if (optIdx === q.correctAnswerIndex) {
+                      optionClass += "bg-green-200 border-green-400 text-green-900 font-bold"; // Correct answer always green
+                    } else if (optIdx === userAnswerIdx && !isCorrect) {
+                      optionClass += "bg-red-200 border-red-400 text-red-900 font-bold"; // Wrong User Selection
+                    } else {
+                      optionClass += "bg-white border-slate-200 text-slate-500";
+                    }
+
+                    return (
+                      <div key={optIdx} className={optionClass}>
+                        {['ก', 'ข', 'ค', 'ง'][optIdx]}. {opt}
+                        {optIdx === q.correctAnswerIndex && " ✅"}
+                        {optIdx === userAnswerIdx && !isCorrect && " ❌ (ตอบพลาดยังไงล่ะ)"}
+                        {optIdx === userAnswerIdx && isCorrect && " (ตอบถูกจ้า)"}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="ml-11 bg-white p-4 rounded-xl border border-slate-200">
+                  <p className="text-sm font-bold text-slate-500 mb-1">คำอธิบาย:</p>
+                  <p className="text-slate-700">{q.explanation}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const renderResult = () => {
     const percentage = (quizState.score / quizState.questions.length) * 100;
     let message = "";
@@ -486,7 +808,7 @@ const App: React.FC = () => {
           <div className="space-y-3">
             <Button fullWidth onClick={() => {
               setScreen(AppScreen.SUMMARY);
-              setQuizState(prev => ({ ...prev, currentQuestionIndex: 0, score: 0, selectedOption: null, showExplanation: false }));
+              setQuizState(prev => ({ ...prev, currentQuestionIndex: 0, score: 0, selectedOption: null, showExplanation: false, userAnswers: [], attempts: 0 }));
             }}>
               📖 ทบทวนบทเรียนอีกครั้ง
             </Button>
@@ -512,6 +834,7 @@ const App: React.FC = () => {
       {screen === AppScreen.SUMMARY && renderSummary()}
       {screen === AppScreen.QUIZ && renderQuiz()}
       {screen === AppScreen.RESULT && renderResult()}
+      {screen === AppScreen.REVIEW && renderReview()}
     </div>
   );
 };

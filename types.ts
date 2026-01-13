@@ -3,7 +3,8 @@ export enum AppScreen {
   PROCESSING = 'PROCESSING',
   SUMMARY = 'SUMMARY',
   QUIZ = 'QUIZ',
-  RESULT = 'RESULT'
+  RESULT = 'RESULT',
+  REVIEW = 'REVIEW'
 }
 
 export interface QuizQuestion {
@@ -35,6 +36,7 @@ export interface QuizState {
   selectedOption: number | null;
   showExplanation: boolean;
   attempts: number;
+  userAnswers: (number | null)[]; // Index of selected option for each question
 }
 
 export interface ChatMessage {

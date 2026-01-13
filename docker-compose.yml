@@ -28,8 +28,34 @@ services:
     profiles:
       - tunnel
 
+  backend:
+    build: ./backend
+    container_name: kruai-backend
+    ports:
+      - "5001:5000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/kruai_db
+    depends_on:
+      - postgres
+    command: >
+      sh -c "npm install && node init_db.js && node server.js"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: kruai-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=kruai_db
+    volumes:
+      - kruai-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
 volumes:
   kruai-uploads:
     driver: local
   kruai-data:
+    driver: local
+  kruai-db-data:
     driver: local
