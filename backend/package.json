@@ -2,10 +2,10 @@
     "name": "kruai-backend",
     "version": "1.0.0",
     "description": "Backend API for KruAI",
-    "main": "server.js",
+    "main": "server.cjs",
     "scripts": {
-        "start": "node server.js",
-        "init-db": "node init_db.js"
+        "start": "node server.cjs",
+        "init-db": "node init_db.cjs"
     },
     "dependencies": {
         "cors": "^2.8.5",

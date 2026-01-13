@@ -1,2 +1,2 @@
-const app = require('../backend/server');
+const app = require('../backend/server.cjs');
 module.exports = app;

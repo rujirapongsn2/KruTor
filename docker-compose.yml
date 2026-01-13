@@ -38,7 +38,7 @@ services:
     depends_on:
       - postgres
     command: >
-      sh -c "npm install && node init_db.js && node server.js"
+      sh -c "npm install && node init_db.cjs && node server.cjs"
     restart: unless-stopped
 
   postgres:
