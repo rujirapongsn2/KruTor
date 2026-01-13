@@ -34,8 +34,9 @@ const ProfileSelector: React.FC<ProfileSelectorProps> = ({ onUserSelected }) => 
         try {
             const newUser = await apiService.createUser(nickname, grade, summaryStyle);
             onUserSelected(newUser);
-        } catch (error) {
-            alert('สร้างบัญชีไม่สำเร็จ');
+        } catch (error: any) {
+            console.error('Create user failed:', error);
+            alert(`สร้างบัญชีไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาดบางอย่าง'}`);
         }
     };
 

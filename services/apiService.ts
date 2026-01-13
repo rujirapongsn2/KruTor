@@ -39,7 +39,16 @@ export const apiService = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nickname, grade, summary_style: summaryStyle })
         });
-        if (!res.ok) throw new Error('Failed to create user');
+        if (!res.ok) {
+            let detail = 'Failed to create user';
+            try {
+                const errData = await res.json();
+                detail = errData.details || errData.error || detail;
+            } catch (e) {
+                // Not JSON
+            }
+            throw new Error(detail);
+        }
         return res.json();
     },
 

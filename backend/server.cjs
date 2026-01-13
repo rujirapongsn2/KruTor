@@ -32,7 +32,7 @@ app.post('/api/users', async (req, res) => {
         res.json(result.rows[0]);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ error: 'Server error', details: err.message });
     }
 });
 
@@ -134,6 +134,16 @@ app.get('/api/quiz-history/:userId', async (req, res) => {
 // Health check
 app.get('/health', (req, res) => {
     res.send('API is running');
+});
+
+// DB Test
+app.get('/api/db-test', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT NOW()');
+        res.json({ success: true, time: result.rows[0], env: !!process.env.DATABASE_URL });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message, stack: err.stack });
+    }
 });
 
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
