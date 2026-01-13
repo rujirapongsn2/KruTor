@@ -11,9 +11,16 @@ app.use(cors());
 app.use(express.json());
 
 // Database Connection
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) {
+    console.warn('⚠️ DATABASE_URL not found, falling back to local Docker Postgres');
+} else {
+    console.log('✅ DATABASE_URL found, connecting to production database');
+}
+
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@postgres:5432/kruai_db',
-    ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require')
+    connectionString: dbUrl || 'postgresql://postgres:postgres@postgres:5432/kruai_db',
+    ssl: dbUrl && dbUrl.includes('sslmode=require')
         ? { rejectUnauthorized: false }
         : false
 });
