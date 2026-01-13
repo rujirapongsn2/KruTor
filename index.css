@@ -1,34 +1,43 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 body {
-  font-family: 'Sarabun', sans-serif;
+    font-family: 'Sarabun', sans-serif;
 }
 
-h1, h2, h3, h4, h5, h6, .fun-font {
-  font-family: 'Kodchasan', sans-serif;
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.fun-font {
+    font-family: 'Kodchasan', sans-serif;
 }
 
 /* Custom scrollbar for iPad feel */
 ::-webkit-scrollbar {
-  width: 8px;
+    width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
-  border-radius: 4px;
+    background: #CBD5E1;
+    border-radius: 4px;
 }
 
 .animate-bounce-slow {
-  animation: bounce 3s infinite;
+    animation: bounce 3s infinite;
 }
 
 @keyframes confetti-fall {
-  0% { transform: translateY(-100vh) rotate(0deg); }
-  100% { transform: translateY(100vh) rotate(720deg); }
+    0% {
+        transform: translateY(-100vh) rotate(0deg);
+    }
+
+    100% {
+        transform: translateY(100vh) rotate(720deg);
+    }
 }
