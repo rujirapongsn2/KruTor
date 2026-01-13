@@ -19,8 +19,19 @@ const createTables = async () => {
         id SERIAL PRIMARY KEY,
         nickname VARCHAR(100) NOT NULL,
         grade VARCHAR(50) NOT NULL,
+        summary_style VARCHAR(20) DEFAULT 'SHORT',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration: Add summary_style to users if not exists (for existing tables)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='summary_style') THEN
+          ALTER TABLE users ADD COLUMN summary_style VARCHAR(20) DEFAULT 'SHORT';
+        END IF;
+      END $$;
     `);
     console.log('Users table created/verified');
 
