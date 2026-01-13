@@ -2,16 +2,19 @@ const { Client } = require('pg');
 require('dotenv').config();
 
 const client = new Client({
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@postgres:5432/kruai_db',
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@postgres:5432/kruai_db',
+  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require')
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 const createTables = async () => {
-    try {
-        await client.connect();
-        console.log('Connected to database');
+  try {
+    await client.connect();
+    console.log('Connected to database');
 
-        // Create Users Table
-        await client.query(`
+    // Create Users Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         nickname VARCHAR(100) NOT NULL,
@@ -19,10 +22,10 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-        console.log('Users table created/verified');
+    console.log('Users table created/verified');
 
-        // Create Summaries Table
-        await client.query(`
+    // Create Summaries Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS summaries (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id),
@@ -31,10 +34,10 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-        console.log('Summaries table created/verified');
+    console.log('Summaries table created/verified');
 
-        // Create Quiz History Table
-        await client.query(`
+    // Create Quiz History Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS quiz_history (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id),
@@ -44,13 +47,13 @@ const createTables = async () => {
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-        console.log('Quiz History table created/verified');
+    console.log('Quiz History table created/verified');
 
-    } catch (err) {
-        console.error('Error initializing database:', err);
-    } finally {
-        await client.end();
-    }
+  } catch (err) {
+    console.error('Error initializing database:', err);
+  } finally {
+    await client.end();
+  }
 };
 
 createTables();

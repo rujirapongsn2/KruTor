@@ -13,6 +13,9 @@ app.use(express.json());
 // Database Connection
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@postgres:5432/kruai_db',
+    ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require')
+        ? { rejectUnauthorized: false }
+        : false
 });
 
 // --- API Routes ---
