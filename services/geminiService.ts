@@ -9,6 +9,12 @@ const apiKey = (typeof process !== 'undefined' && process.env?.API_KEY) ||
   (import.meta as any).env?.VITE_API_KEY ||
   "";
 
+if (!apiKey) {
+  console.error("❌ Gemini API Key is missing! Please check your Vercel Environment Variables.");
+} else {
+  console.log("✅ Gemini API Key found (length: " + apiKey?.length + ")");
+}
+
 const ai = new GoogleGenAI({ apiKey });
 
 const MODEL_NAME = 'gemini-3-flash-preview';
