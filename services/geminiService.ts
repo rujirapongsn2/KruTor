@@ -4,7 +4,12 @@ import { QuizQuestion, SummaryData } from "../types";
 import { FileData } from "../types";
 
 // Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = (typeof process !== 'undefined' && process.env?.API_KEY) ||
+  (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+  (import.meta as any).env?.VITE_API_KEY ||
+  "";
+
+const ai = new GoogleGenAI({ apiKey });
 
 const MODEL_NAME = 'gemini-3-flash-preview';
 
