@@ -85,11 +85,13 @@ const ProfileSelector: React.FC<ProfileSelectorProps> = ({ onUserSelected }) => 
                             />
                         </div>
                         <div>
-                            <label className="block text-gray-700 font-bold mb-2">ชั้นเรียน</label>
+                            <label htmlFor="grade-select" className="block text-gray-700 font-bold mb-2">ชั้นเรียน</label>
                             <select
+                                id="grade-select"
                                 value={grade}
                                 onChange={(e) => setGrade(e.target.value)}
                                 className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-blue-500 outline-none text-lg bg-white"
+                                title="เลือกชั้นเรียน"
                             >
                                 {['ป.4', 'ป.5', 'ป.6'].map(g => (
                                     <option key={g} value={g}>{g}</option>

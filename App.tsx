@@ -486,7 +486,7 @@ const App: React.FC = () => {
       <Mascot emotion="thinking" className="w-32 h-32 md:w-48 md:h-48 animate-pulse mb-8" />
       <h2 className="text-2xl font-bold text-slate-700 fun-font animate-pulse">{loadingMessage}</h2>
       <div className="mt-8 w-64 h-4 bg-slate-200 rounded-full overflow-hidden">
-        <div className="h-full bg-blue-500 animate-[width_2s_ease-in-out_infinite]" style={{ width: '80%' }}></div>
+        <div className="h-full bg-blue-500 animate-[width_2s_ease-in-out_infinite] w-[80%]"></div>
       </div>
     </div>
   );
