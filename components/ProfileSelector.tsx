@@ -12,6 +12,7 @@ const ProfileSelector: React.FC<ProfileSelectorProps> = ({ onUserSelected }) => 
     const [grade, setGrade] = useState('ป.4');
     const [summaryStyle, setSummaryStyle] = useState<'SHORT' | 'DETAILED'>('SHORT');
     const [isCreating, setIsCreating] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
         fetchUsers();
@@ -30,14 +31,23 @@ const ProfileSelector: React.FC<ProfileSelectorProps> = ({ onUserSelected }) => 
 
     const handleCreateUser = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!nickname) return;
+        if (!nickname || submitting) return;
+        setSubmitting(true);
         try {
             const newUser = await apiService.createUser(nickname, grade, summaryStyle);
             onUserSelected(newUser);
         } catch (error: any) {
             console.error('Create user failed:', error);
             alert(`สร้างบัญชีไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาดบางอย่าง'}`);
+        } finally {
+            setSubmitting(false);
         }
+    };
+
+    const handleUserSelectedInList = (user: User) => {
+        if (submitting) return;
+        setSubmitting(true);
+        onUserSelected(user);
     };
 
     if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -54,8 +64,9 @@ const ProfileSelector: React.FC<ProfileSelectorProps> = ({ onUserSelected }) => 
                             {users.map(user => (
                                 <button
                                     key={user.id}
-                                    onClick={() => onUserSelected(user)}
-                                    className="w-full text-left p-4 rounded-xl border-2 border-blue-100 hover:border-blue-400 hover:bg-blue-50 transition-all flex justify-between items-center group"
+                                    onClick={() => handleUserSelectedInList(user)}
+                                    disabled={submitting}
+                                    className="w-full text-left p-4 rounded-xl border-2 border-blue-100 hover:border-blue-400 hover:bg-blue-50 transition-all flex justify-between items-center group disabled:opacity-50"
                                 >
                                     <span className="font-bold text-lg text-gray-800 group-hover:text-blue-700">{user.nickname}</span>
                                     <span className="text-sm bg-blue-100 text-blue-600 px-2 py-1 rounded-lg">{user.grade}</span>
@@ -130,9 +141,23 @@ const ProfileSelector: React.FC<ProfileSelectorProps> = ({ onUserSelected }) => 
 
                         <button
                             type="submit"
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg transform hover:-translate-y-1 transition-all"
+                            disabled={submitting}
+                            className={`w-full font-bold py-4 rounded-xl shadow-lg transform transition-all ${submitting
+                                ? 'bg-blue-300 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700 hover:-translate-y-1 text-white'
+                                }`}
                         >
-                            เริ่มเรียนกันเลย! 🚀
+                            {submitting ? (
+                                <span className="flex items-center justify-center">
+                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    กำลังบันทึกข้อมูล...
+                                </span>
+                            ) : (
+                                "เริ่มเรียนกันเลย! 🚀"
+                            )}
                         </button>
 
                         {users.length > 0 && (
