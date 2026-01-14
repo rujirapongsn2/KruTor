@@ -526,9 +526,18 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={handleSaveSummary}
-              className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-4 py-2 rounded-full shadow-sm font-bold flex items-center gap-2 transition-all"
+              disabled={loadingMessage === 'กำลังบันทึก...'}
+              className={`bg-purple-100 hover:bg-purple-200 text-purple-700 px-4 py-2 rounded-full shadow-sm font-bold flex items-center gap-2 transition-all ${loadingMessage === 'กำลังบันทึก...' ? 'opacity-75 cursor-not-allowed' : ''}`}
             >
-              💾 บันทึกไว้อ่าน
+              {loadingMessage === 'กำลังบันทึก...' ? (
+                <>
+                  <span className="animate-spin">⏳</span> กำลังบันทึก...
+                </>
+              ) : (
+                <>
+                  💾 บันทึกไว้อ่าน
+                </>
+              )}
             </button>
             <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm">
               <span className="text-2xl">📚</span>
