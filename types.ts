@@ -36,7 +36,8 @@ export interface QuizState {
   selectedOption: number | null;
   showExplanation: boolean;
   attempts: number;
-  userAnswers: (number | null)[]; // Index of selected option for each question
+  userAnswers: (number | null)[]; // Index of selected option for each question (final answer)
+  attemptHistory: number[][]; // Array of attempts for each question [ [0, 1], [2], ... ]
 }
 
 export interface ChatMessage {

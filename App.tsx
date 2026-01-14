@@ -30,7 +30,8 @@ const App: React.FC = () => {
     selectedOption: null,
     showExplanation: false,
     attempts: 0,
-    userAnswers: []
+    userAnswers: [],
+    attemptHistory: []
   });
   const [loadingMessage, setLoadingMessage] = useState('');
   const [reviewData, setReviewData] = useState<QuizRecord | null>(null);
@@ -84,7 +85,8 @@ const App: React.FC = () => {
       selectedOption: null,
       showExplanation: false,
       attempts: 0,
-      userAnswers: []
+      userAnswers: [],
+      attemptHistory: []
     });
   };
 
@@ -107,7 +109,8 @@ const App: React.FC = () => {
         selectedOption: null,
         showExplanation: false,
         attempts: 0,
-        userAnswers: new Array(quizQuestions.length).fill(null)
+        userAnswers: new Array(quizQuestions.length).fill(null),
+        attemptHistory: new Array(quizQuestions.length).fill([])
       });
       setScreen(AppScreen.QUIZ);
     } catch (error) {
@@ -191,7 +194,8 @@ const App: React.FC = () => {
         selectedOption: null,
         showExplanation: false,
         attempts: 0,
-        userAnswers: []
+        userAnswers: [],
+        attemptHistory: new Array(quizQuestions.length).fill([])
       });
 
       setScreen(AppScreen.SUMMARY);
@@ -267,6 +271,22 @@ const App: React.FC = () => {
           };
         });
       }
+
+      // Record this attempt in history regardless of outcome
+      setQuizState(prev => {
+        const newHistory = [...prev.attemptHistory];
+        // Ensure the array exists for this index (it should)
+        const currentQuestionHistory = newHistory[prev.currentQuestionIndex] ? [...newHistory[prev.currentQuestionIndex]] : [];
+        if (!currentQuestionHistory.includes(optionIndex)) {
+          currentQuestionHistory.push(optionIndex);
+        }
+        newHistory[prev.currentQuestionIndex] = currentQuestionHistory;
+
+        return {
+          ...prev,
+          attemptHistory: newHistory
+        }
+      });
     }
   };
 
@@ -284,7 +304,8 @@ const App: React.FC = () => {
           {
             topic: summary?.originalTopic,
             questions: quizState.questions, // Save full questions
-            userAnswers: quizState.userAnswers // Save user answers
+            userAnswers: quizState.userAnswers, // Save user answers
+            attemptHistory: quizState.attemptHistory // Save attempt history
           }
         ).then(() => loadUserData());
       }
@@ -776,6 +797,20 @@ const App: React.FC = () => {
                         {optIdx === userAnswerIdx && isCorrect && " (ตอบถูกจ้า)"}
                       </div>
                     );
+                  })}
+                </div>
+
+                <div className="ml-11 mb-4 flex gap-2 flex-wrap">
+                  {q.options.map((_: any, idx: number) => {
+                    const history = reviewData.details?.attemptHistory?.[questions.indexOf(q)] || [];
+                    if (history.includes(idx) && idx !== q.correctAnswerIndex) {
+                      return (
+                        <span key={idx} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full border border-red-200">
+                          เคยตอบข้อ {['ก', 'ข', 'ค', 'ง'][idx]} (ผิด)
+                        </span>
+                      )
+                    }
+                    return null;
                   })}
                 </div>
 
