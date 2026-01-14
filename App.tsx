@@ -48,10 +48,10 @@ const App: React.FC = () => {
     }
   }, [user]);
 
-  // Scroll to top when screen changes
+  // Scroll to top when screen or content changes
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [screen]);
+    window.scrollTo(0, 0);
+  }, [screen, summary, reviewData]);
 
   const loadUserData = async () => {
     if (!user) return;
